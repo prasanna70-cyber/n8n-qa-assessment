@@ -1,0 +1,317 @@
+{
+  "name": "HN Morning Brief - Deepthi Prasanna",
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n2",
+      "name": "Manual Trigger (testing)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "n3",
+      "name": "Get Top Story IDs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        100
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "n4",
+      "name": "Take Top 5",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normalize the HackerNews response (array of IDs) and keep only the top 5\nconst ids = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  if (Array.isArray(j)) ids.push(...j);\n  else if (typeof j === 'number') ids.push(j);\n  else if (j && Array.isArray(j.data)) ids.push(...j.data);\n  else if (j && typeof j.data === 'number') ids.push(j.data);\n}\nreturn ids.slice(0, 5).map(id => ({ json: { id } }));"
+      }
+    },
+    {
+      "id": "n5",
+      "name": "Get Story Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        0
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "=https://hacker-news.firebaseio.com/v0/item/{{ $json.id }}.json",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "n6",
+      "name": "Build Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Reshape: keep valid stories, sort by score (highest first), build one digest text\nconst stories = $input.all()\n  .map(i => i.json)\n  .filter(s => s && s.title && typeof s.score === 'number')\n  .sort((a, b) => b.score - a.score);\n\nif (stories.length === 0) {\n  throw new Error('No valid stories returned by the HackerNews item API');\n}\n\nconst lines = stories.map((s, i) => {\n  const link = s.url || ('https://news.ycombinator.com/item?id=' + s.id);\n  return (i + 1) + '. ' + s.title + ' (' + s.score + ' points, ' + (s.descendants || 0) + ' comments)\\n' + link;\n});\n\nreturn [{ json: {\n  topScore: stories[0].score,\n  topTitle: stories[0].title,\n  digest: lines.join('\\n\\n')\n} }];"
+      }
+    },
+    {
+      "id": "n7",
+      "name": "Top Score > 100?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.topScore }}",
+              "rightValue": 100,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n8",
+      "name": "Send Hot Digest",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        -200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail account"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "prasannadeepthi70@gmail.com",
+        "subject": "🔥 HN Morning Brief: HOT digest (top story over 100 points)",
+        "emailType": "text",
+        "message": "={{ $json.digest }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "n9",
+      "name": "Send Normal Digest",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail account"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "prasannadeepthi70@gmail.com",
+        "subject": "HN Morning Brief: quiet day digest",
+        "emailType": "text",
+        "message": "={{ $json.digest }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "n10",
+      "name": "Alert on Failure",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        780,
+        260
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail account"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "prasannadeepthi70@gmail.com",
+        "subject": "⚠️ HN Morning Brief: an API call failed",
+        "emailType": "text",
+        "message": "={{ 'Error: ' + ($json.error?.message || $json.message || JSON.stringify($json.error || {})) }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Top Story IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger (testing)": {
+      "main": [
+        [
+          {
+            "node": "Get Top Story IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Top Story IDs": {
+      "main": [
+        [
+          {
+            "node": "Take Top 5",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert on Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Take Top 5": {
+      "main": [
+        [
+          {
+            "node": "Get Story Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Story Details": {
+      "main": [
+        [
+          {
+            "node": "Build Digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert on Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Digest": {
+      "main": [
+        [
+          {
+            "node": "Top Score > 100?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Top Score > 100?": {
+      "main": [
+        [
+          {
+            "node": "Send Hot Digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Normal Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
